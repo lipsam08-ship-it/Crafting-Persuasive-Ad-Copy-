@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from io import StringIO
+# Remove unused import: from io import StringIO
 
 # Set page config
 st.set_page_config(
@@ -23,7 +23,7 @@ if 'ad_copies' not in st.session_state:
 with st.sidebar:
     st.title("🧪 A/B Test Settings")
     st.markdown("---")
-    base_conversion = st.slider("Expected Base Conversion Rate (%)", 0.1, 10.0, 2.0, 0.1) / 100
+    base_conversion = st.slider("Expected Base Conversion Rate (%)", 0.1, 10.0, 2.0, 0.1) / 100.0
     sample_size = st.number_input("Sample Size per Variation", 1000, 100000, 10000, 1000)
     st.info("💡 Enter your ad copies below, then run the simulation!")
 
@@ -41,29 +41,36 @@ with tab1:
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        copy1 = st.text_area("Variation 1", value=st.session_state.ad_copies[0], height=200)
+        copy1 = st.text_area("Variation 1", value=st.session_state.ad_copies[0], height=200, key="copy1")
     with col2:
-        copy2 = st.text_area("Variation 2", value=st.session_state.ad_copies[1], height=200)
+        copy2 = st.text_area("Variation 2", value=st.session_state.ad_copies[1], height=200, key="copy2")
     with col3:
-        copy3 = st.text_area("Variation 3", value=st.session_state.ad_copies[2], height=200)
+        copy3 = st.text_area("Variation 3", value=st.session_state.ad_copies[2], height=200, key="copy3")
     
-    if st.button("💾 Save Ad Copies", type="primary"):
+    if st.button("💾 Save Ad Copies", type="primary", key="save_copies"):
         st.session_state.ad_copies = [copy1, copy2, copy3]
         st.success("Ad copies saved! Go to 'A/B Test Results' to simulate.")
         st.session_state.ab_test_results = None
 
 with tab2:
-    if not any(st.session_state.ad_copies):
-        st.info("Please enter at least one ad copy in the 'Enter Ad Copies' tab.")
+    st.subheader("A/B Test Simulation")
+    
+    # Check if we have valid ad copies
+    valid_copies = [copy for copy in st.session_state.ad_copies if copy and copy.strip()]
+    
+    if len(valid_copies) < 1:
+        st.info("Please enter at least one ad copy in the 'Enter Ad Copies' tab and click 'Save Ad Copies'.")
     else:
-        if st.button("🚀 Run A/B Test Simulation", type="primary"):
+        if st.button("🚀 Run A/B Test Simulation", type="primary", key="run_simulation"):
             variations = [v for v in st.session_state.ad_copies if v.strip()]
             if len(variations) == 0:
-                st.warning("Please enter at least one ad copy.")
+                st.warning("Please enter at least one valid ad copy.")
             else:
                 results = []
                 for i, variation in enumerate(variations):
-                    conversion_rate = base_conversion * (1 + np.random.uniform(-0.2, 0.5))
+                    # Ensure conversion rate stays within valid bounds
+                    conversion_multiplier = np.random.uniform(0.8, 1.5)  # 80% to 150% of base
+                    conversion_rate = max(0.001, min(0.99, base_conversion * conversion_multiplier))
                     conversions = np.random.binomial(sample_size, conversion_rate)
                     results.append({
                         'Variation': f'Variation {i+1}',
@@ -80,17 +87,18 @@ with tab2:
         if st.session_state.ab_test_results is not None:
             df = st.session_state.ab_test_results
             st.subheader("📈 Simulated Results")
-            st.dataframe(
-                df.style.format({
-                    'Conversion Rate': '{:.2%}',
-                    'CTR': '{:.2%}'
-                }),
-                use_container_width=True
-            )
+            
+            # Format the dataframe for display
+            display_df = df.copy()
+            display_df['Conversion Rate'] = display_df['Conversion Rate'].apply(lambda x: f"{x:.2%}")
+            display_df['CTR'] = display_df['CTR'].apply(lambda x: f"{x:.2%}")
+            
+            st.dataframe(display_df, use_container_width=True)
             
             winner_idx = df['Conversion Rate'].idxmax()
             winner = df.loc[winner_idx, 'Variation']
-            st.success(f"🏆 **{winner}** wins with **{df.loc[winner_idx, 'Conversion Rate']:.2%}** conversion rate!")
+            winner_rate = df.loc[winner_idx, 'Conversion Rate']
+            st.success(f"🏆 **{winner}** wins with **{winner_rate:.2%}** conversion rate!")
 
 with tab3:
     if st.session_state.ab_test_results is None:
@@ -120,13 +128,15 @@ with tab3:
         
         st.subheader("💡 Recommendations")
         best_idx = df['Conversion Rate'].idxmax()
+        avg_cr = df['Conversion Rate'].mean()
+        improvement = ((df.loc[best_idx, 'Conversion Rate'] / avg_cr) - 1) * 100
+        
         st.markdown(f"""
         - Deploy **{df.loc[best_idx, 'Variation']}** in your campaigns
-        - Its conversion rate is **{((df.loc[best_idx, 'Conversion Rate'] / df['Conversion Rate'].mean()) - 1):+.0%}** above average
+        - Its conversion rate is **{improvement:+.0f}%** above average
         - Consider testing elements from this version in future ads
         """)
 
-# === NEW TAB: Insights & Export ===
 with tab4:
     if st.session_state.ab_test_results is None:
         st.info("Run an A/B test in the 'A/B Test Results' tab to generate insights.")
@@ -139,8 +149,7 @@ with tab4:
         lift = (winner_cr / avg_cr - 1) * 100
 
         # Generate insights text
-        insights = f"""
-Ad Copy A/B Test Insights Report
+        insights = f"""Ad Copy A/B Test Insights Report
 {'='*40}
 
 Test Configuration:
@@ -169,14 +178,16 @@ Variation Details:
             insights += f"  • Ad Copy Snippet: \"{row['Ad Copy']}\"\n"
 
         st.subheader("📄 Generated Insights")
-        st.text_area("Insights Summary", insights, height=500)
+        st.text_area("Insights Summary", insights, height=500, key="insights_text")
 
         # Download button
         st.download_button(
             label="📥 Download Insights Report (.txt)",
             data=insights,
             file_name="ad_copy_ab_test_insights.txt",
-            mime="text/plain"
+            mime="text/plain",
+            key="download_insights"
         )
 
 st.markdown("---")
+st.caption("Ad Copy A/B Tester | Simulate and optimize your advertising performance")
